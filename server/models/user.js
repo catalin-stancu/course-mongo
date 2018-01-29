@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const validator = require('validator');
 const jwt = require('jsonwebtoken');
 const _ = require('lodash');
+const bcrypt = require('bcryptjs');
 
 var UserSchema = new mongoose.Schema({
   email: {
@@ -61,13 +62,22 @@ UserSchema.methods.generateAuthToken = function(){
   });
 };
 
+UserSchema.methods.removeToken = function(token){
+  var user = this;
+
+  return user.update({
+    $pull:{
+      tokens:{token}
+    }
+  });
+}
+
 UserSchema.statics.findByToken = function(token) {
   var User = this;
   var decoded;
 
   try{
     decoded = jwt.verify(token, 'abc123');
-    console.log(JSON.stringify(decoded));
   } catch(e){
     // return new Promise((resolve, reject) => {
     //   reject();
@@ -79,6 +89,52 @@ UserSchema.statics.findByToken = function(token) {
     '_id': decoded._id,
     'tokens.token': token,
     'tokens.access': 'auth'
+  });
+};
+
+UserSchema.pre('save', function(next){
+  var user = this;
+
+  if(user.isModified('password')){
+    bcrypt.genSalt(10, (err, salt) => {
+      if(err){
+        return console.log(err);
+      } else {
+        bcrypt.hash(user.password, salt, (err, hash) => {
+          if(err){
+            return console.log(err);
+          } else {
+            user.password = hash;
+            next();
+          }
+        });
+      }
+    });
+  } else {
+    next();
+  }
+});
+
+UserSchema.statics.findByCredentials = function(email, password){
+  var User = this;
+
+  return User.findOne({email}).then((user) => {
+    if(!user) {
+      return Promise.reject();
+    }
+
+    return new Promise((resolve, reject) => {
+      bcrypt.compare(password, user.password, (err, result) => {
+        if(err){
+          return reject();
+        }
+        if(result){
+          resolve(user);
+        } else {
+          reject();
+        }
+      });
+    });
   });
 };
 
